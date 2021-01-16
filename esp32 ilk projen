@@ -1,0 +1,321 @@
+/////////////////////////////////////////////----DESİGNED BY BURAK UZUN----///////////////////////////////////////////////
+//https://dl.espressif.com/dl/package_esp32_index.json, http://arduino.esp8266.com/stable/package_esp8266com_index.json
+//-----------------------------------------------------------------------------------------------------------------------
+#include <BlynkSimpleEsp32.h>
+#include <WiFiClient.h>
+#include <TimeLib.h>
+#include <WidgetRTC.h>
+#define BLYNK_PRINT Serial
+#define r 13   //röle su motoru
+#define ek 12   //röle2 yani ışık
+//-----------------------------------------------------------------------------------------------------------------------
+BlynkTimer timer;
+WidgetRTC rtc;
+WidgetLCD lcd(V16);//saati i gösteriyor
+WidgetTerminal terminal (V14);
+WidgetLED durum1(V4);            //KAPALI led
+WidgetLED durum2(V5);            //AÇIK  led
+WidgetLED ekDurum1(V10);         //KAPALI  led
+WidgetLED ekDurum2(V11);         //AÇIK    led
+WidgetLED sys(V18);             //internet varmı blynk üzerinden yanıp sönen led
+//-----------------------------------------------------------------------------------------------------------------------
+String currentTime;
+String currentDate;
+int rssi = 0;                   //internetin ne kadar çektiği ile ilgili bar çubuğunun değişkeni
+char auth[] = "xxxxxxxxxxxxxxx";
+char ssid[] = "Burak";
+char pass[] = "Sekonder343434";
+//-----------------------------------------------------------------------------------------------------------------------
+void setup()
+{
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(r, OUTPUT);
+  pinMode(ek, OUTPUT);
+  digitalWrite(r, HIGH);
+  digitalWrite(ek, LOW);//bu röle bağlantısı su pomasına bağlı ve elektrik gittiğinde sistem setup satırını çalıştırırsa kapatmamız gerekiyor(röle komutla tersinir çalışıyor)
+  Serial.begin(9600);
+  Serial.print("Designed By ----BURAK UZUN----");
+  Serial.println("---SİSTEM BAŞLATILIYOR 5 SANİYE BEKLEYİNİZ---");
+  delay(5000);
+  Serial.println("Işık ,Güvenlik Amacı İle Sistem tarafından açıldı,motor kapandı. IŞIK,Blynk sınamasına tekrar denetlenecek");
+  digitalWrite(LED_BUILTIN, HIGH);//bu led internet ile ilgili bilgi veriyor(eğer kısa süreli aralıklarla yanıp sönüyörsa wifi.h kütüphanesi bağlanıyor,eğer sürekli yanıyorsa blynk kütüphanesi bağlanmaya çalışıyor)
+  Serial.println("Aşağıdaki Ağlar ile bağlantı kuruluyor");
+  Serial.println("Ağ Adı,şifresi:");
+  Serial.println(ssid);
+  Serial.println(pass);
+  WiFi.begin(ssid, pass);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(1000);
+    Serial.println("...ilk defa wifi.h Bağlantı aranıyor..");
+    kurulum();
+  }
+  Serial.println("wifi.h İnternete bağlandı");
+  digitalWrite(LED_BUILTIN, HIGH);
+  Serial.println("başlangıç Blynk sunucu Bağlantısı Taranıyor 5 saniye sonra blynk denenecek");
+  delay(5000);
+  Blynk.config(auth);  // blynk.begin kullanmadın çünkü onda while döngüsü doğru çalışmıyor.bunda istediğin gibi halledebilirsin işi
+  Blynk.connect(10000);//10 saniyede bu bağlanacak
+  Serial.println("BLYNK.CONNECT,Blynk.CONFİG ÇALIŞTI");
+
+  if (Blynk.connected()) {
+    Serial.println("Blynk sunucusuna Bağlandı");
+    Serial.println("Sistemimizin İnternet bağlantısı başarılı Sistem rutine başlıyor... ");
+  } else {
+    Serial.println("Başlangıç bağlantısı sağlanamadı sistem tekrar başlatılıyor");
+    ESP.restart();
+  }
+  digitalWrite(LED_BUILTIN, LOW);        // işlemler bittiğinde sistem hazır olduğunu der
+  Blynk.virtualWrite(V2,LOW);           //blynk butonsal olarak motoru kapatacak böylelikle elle kapanmış gibi olacak ve sistem rutinden çıkmayacak
+  motorkapandiled();
+  delay(100);  
+  Blynk.syncVirtual(V7);//ışığı blynk ugulamasındaki butonun verdiği komuta göre halledecek
+  delay(100);
+  terminal.println("...............................");
+  terminal.println("İnternet bağlandı");
+  terminal.print("Bağlanılan Ağ;");
+  terminal.print(ssid);
+  delay(100);
+  terminal.println("Blynk bağlandı");
+  delay(100);
+  terminal.print("Su Motoru:Güvenlik Amacıyla Kapatıldı");
+  delay(100);
+  terminal.print(" ");
+  terminal.println("............SİSTEM HAZIR............");
+  terminal.flush();
+  setSyncInterval(10 * 60); // Sync interval in seconds (10 minutes)
+  timer.setInterval(10000L, clockDisplay);
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void loop()
+{
+  while (Blynk.connected() == true)
+  {
+    Blynk.run();
+    timer.run();
+    rssi = WiFi.RSSI();
+    Blynk.virtualWrite(V15, rssi); //internetin ne kadar çektiği ile ilgili bar açmıştık ona veri gönderiyor.
+    whathappendsys();
+  }
+  while (Blynk.connected() == false)
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    Serial.println("Blynk Sunucusu kaybedildi tekrar bağlanmak için kod dizini çalıştırılıyor...");
+    while (WiFi.status() != WL_CONNECTED) {
+      WiFi.reconnect();
+      delay(5000);
+      kurulum();
+      Serial.println("wifi.h loopta 1. kez bağlanmaya çalışıyor...");
+    }
+    Serial.println("wifi.h kütüphanesi bağlandı 5 saniye sonra blynk kütüphanesi loop döngüsünde tekrar denenecek");
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(5000);
+    while (Blynk.connected() == false) {
+      Serial.println("Blynk.connect  ve config  çalıştırılıyor");
+      Blynk.config(auth);
+      Blynk.connect(5000);
+      while (WiFi.status() != WL_CONNECTED) {
+        WiFi.reconnect();
+        kurulum();
+        delay(5000);
+        Serial.println("wifi.h loopta 2. kez bağlanmaya çalışıyor... 5 saniyede bir");
+      }
+    }
+    Serial.println("Blynk kütüphanesi aktif");
+    terminal.println("***Kesilen Bağlantı Onarıldı***");
+    Blynk.syncVirtual(V7);//ışığı butona göre açacak
+    Blynk.syncVirtual(V2);//dikkat et motoru butona göre açabilir!!!!!!!!!!!
+    terminal.println("**********************");
+    terminal.flush();
+    Serial.println("Sistem rutine oturdu devam ediliyor...");
+    Serial.println("blynk işliyor...");
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V2) {
+  
+  int motor = param.asInt();
+  if (param.asInt() == 1) {
+    Serial.println("su motoru buton komut durumu blynk:");
+    Serial.println(motor);
+    led();
+    digitalWrite(r, LOW);                                                 //su motor acildi
+    Serial.println("Su Motoru  açıldı");
+    motoracildiled();
+    terminal.println("Su Motoru Açıldı");
+    nezamanoldu();
+  }
+  if (param.asInt() == 0) {
+    Serial.println("su motoru buton komut durumu blynk:");
+    Serial.println(motor);
+    led();
+    digitalWrite(r, HIGH);                                //motoru kapatır
+    Serial.println("su Motoru  kapatıldı");
+    motorkapandiled();
+    terminal.println("su Motoru KAPATILDI");
+    nezamanoldu();
+  }
+}
+BLYNK_WRITE(V6)
+{
+  int zamanlayicimotor = param.asInt();
+  if (param.asInt() == 1) {
+    Serial.println("zamanlayıcı motor  durumu");
+    Serial.println(zamanlayicimotor);
+    led();
+    digitalWrite(r, HIGH);                                //motoru KAPATIR zamanlayıcı ile
+    Serial.print("Su motoru zamanlayıcı ile kapandı");
+    motorkapandiled();
+    Blynk.virtualWrite(V2, LOW);
+    terminal.println("Su motoru zamanlayıcı ile kapandı");
+    nezamanoldu();
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V19)
+{
+  int ne = param.asInt();
+  Serial.println("zamanlayıcı durumu:");
+  Serial.println(ne);
+  if (param.asInt() == 1) {
+    led();
+    digitalWrite(ek, LOW);                                //ek i açar ZAMANLAYICI İLE
+    Serial.print("ışık zamanlayıcı ile açıldı");
+    isikacildiled();
+    terminal.println("Işık ZAMANLAYICI ile AÇILDI");
+    Blynk.virtualWrite(V7, HIGH);
+    nezamanoldu();
+  }
+  if (param.asInt() == 0) {
+    Serial.println("zamanlayıcı durumu");
+    Serial.println(ne);
+    led();
+    digitalWrite(ek, HIGH);                                //ek i kapatır zamanlayıcı ile kapar
+    Serial.print("ışık zamanlayıcı ile kapatıldı");
+    isikkapandiled();
+    terminal.println("Işık zamanlayıcı ile KAPATILDI");
+    Blynk.virtualWrite(V7, LOW);
+    nezamanoldu();
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V7)
+{
+  int isik = param.asInt();
+
+  if (param.asInt() == 1) {
+    Serial.println("ışık için buton komut durumu:");
+    Serial.println(isik);
+    led();
+    digitalWrite(ek, LOW);
+    isikacildiled();                           //ek i açar
+    Serial.println("ışık  açıldı");
+    terminal.println("Işık Açıldı");
+    nezamanoldu();
+  }
+  if (param.asInt() == 0) {
+    Serial.println("ışık içinbuton komut durumu");
+    Serial.println(isik);
+    led();
+    digitalWrite(ek, HIGH);                                //ek i kapar
+    Serial.print("ışık  kapatıldı");
+    isikkapandiled();
+    terminal.println("Işık KAPATILDI");
+    nezamanoldu();
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V12)
+{
+  Serial.println("RESTARTİNG...");
+  terminal.println("RESTARTİNG...");
+  nezamanoldu();
+  ESP.restart();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V17)
+{
+  terminal.println(currentTime);
+  terminal.print(" ");
+  terminal.println(currentDate);
+  terminal.flush();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+BLYNK_WRITE(V9)
+{
+  terminal.clear();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+
+BLYNK_CONNECTED()
+{  
+  rtc.begin();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void clockDisplay()
+{
+  currentTime = String(hour()) + ":" + minute();
+  currentDate = String(day()) + "/" + month() + "/" + year();
+  //Serial.print("Current time: ");
+  //Serial.print(currentTime);
+  //Serial.print(" ");
+  //Serial.print(currentDate);                                      //rtc zamazingosu
+  //Serial.println();
+  Blynk.virtualWrite(V16, currentTime);
+  Blynk.virtualWrite(V17, currentDate);
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void led()
+{
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(500);                                             //ESP ÜZERİNDEKİ (KOMUT ALMA BİLDİRİM) MAVİ LED
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void kurulum()
+{
+  for (int i = 0; i < 3; i++)
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(50);                                             //ESP ÜZERİNDEKİ  MAVİ LED wifi.h ta tek tek yanıp sönecek
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(50);
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------
+
+void nezamanoldu(){//buton komut gönderdiğinde ne zaman olduğu ile ilgili tarihi yazıyor
+  terminal.print(" ");
+    terminal.println(currentTime);
+//    terminal.print(" ");
+//    terminal.println(currentDate);
+    terminal.println("----------");
+    terminal.flush();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void isikacildiled() {
+  ekDurum1.off();
+  ekDurum2.on();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void isikkapandiled() {
+  ekDurum1.on();
+  ekDurum2.off();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void motorkapandiled() {
+  durum1.on();
+  durum2.off();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void motoracildiled() {
+  durum1.off();
+  durum2.on();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+void whathappendsys() {//sistem internete bağlımı onu gösteriyor
+  sys.on();
+  sys.off();
+}
